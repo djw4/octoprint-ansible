@@ -1,0 +1,6 @@
+*.log
+ansible/*
+.vagrant/
+
+!ansible/install_octoprint.yaml
+!ansible/ansible.cfg
