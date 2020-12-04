@@ -1,0 +1,156 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: octoprint
+      block:
+        - name: Upgrade all packages
+          apt:
+            name: "*"
+            state: latest
+          become: true
+        
+        - name: Install packages
+          apt:
+            name:
+              - git
+              - software-properties-common
+              - build-essential
+            state: latest
+          become: true
+        
+        - name: Create octoprint user
+          user:
+            name: octoprint
+            groups: tty,dialout
+            append: yes
+          become: true
+          register: octoprint_user
+        
+        - name: Create octoprint directory
+          file:
+            path: /opt/octoprint
+            state: directory
+            mode: 0755
+            owner: "{{ octoprint_user.name }}"
+            group: "{{ octoprint_user.name }}"
+          become: true
+          register: octoprint_dir
+        
+        - name: Add python3.7 ppa repo
+          apt_repository:
+            repo: ppa:deadsnakes/ppa
+          become: true
+        
+        - name: Update and install python3.7
+          apt:
+            update_cache: yes
+            name:
+              - python3.7
+              - python3.7-venv
+              - python3.7-dev
+            state: latest
+          become: true
+        
+        - name: Manually create the venv
+          command:
+            cmd: python3.7 -m venv venv
+          become: true
+          become_user: "{{ octoprint_user.name }}"
+          args:
+            chdir: "{{ octoprint_dir.path }}"
+            creates: "{{ octoprint_dir.path }}/venv"
+        
+        - name: Install octoprint
+          pip:
+            name: octoprint
+            virtualenv: "{{ octoprint_dir.path }}/venv"
+            virtualenv_python: python3
+          become: true
+          become_user: "{{ octoprint_user.name }}"
+        
+        - name: Create systemd service
+          copy:
+            dest: /etc/systemd/system/octoprint.service
+            content: |
+              [Unit]
+              Description=The snappy web interface for your 3D printer
+              After=network-online.target
+              Wants=network-online.target
+              
+              [Service]
+              Environment="LC_ALL=C.UTF-8"
+              Environment="LANG=C.UTF-8"
+              Type=simple
+              User={{ octoprint_user.name }}
+              ExecStart={{ octoprint_dir.path }}/venv/bin/octoprint
+              
+              [Install]
+              WantedBy=multi-user.target
+          become: true
+        
+        - name: Enable octoprint service
+          systemd:
+            name: octoprint
+            enabled: yes
+            daemon_reload: yes
+            state: started
+          become: true
+        
+        - name: Set octoprint user home directory
+          user:
+            name: "{{ octoprint_user.name }}"
+            home: "{{ octoprint_dir.path }}"
+          become: true
+    
+    - name: haproxy
+      block:
+        - name: Install haproxy with apt
+          apt:
+            name:
+              - haproxy
+            state: latest
+          become: true
+        
+        - name: Deploy haproxy config
+          copy:
+            dest: /etc/haproxy/haproxy.cfg
+            content: |
+              global
+                      maxconn 4096
+                      user haproxy
+                      group haproxy
+                      daemon
+                      log 127.0.0.1 local0 debug
+              defaults
+                      log     global
+                      mode    http
+                      option  httplog
+                      option  dontlognull
+                      retries 3
+                      option redispatch
+                      option http-server-close
+                      option forwardfor
+                      maxconn 2000
+                      timeout connect 5s
+                      timeout client  15min
+                      timeout server  15min
+              frontend public
+                      bind :::80 v4v6
+                      use_backend webcam if { path_beg /webcam/ }
+                      default_backend octoprint
+              backend octoprint
+                      reqrep ^([^\ :]*)\ /(.*)     \1\ /\2
+                      option forwardfor
+                      server octoprint1 127.0.0.1:5000
+              backend webcam
+                      reqrep ^([^\ :]*)\ /webcam/(.*)     \1\ /\2
+                      server webcam1  127.0.0.1:8080
+          become: true
+        
+        - name: Enable and start haproxy service
+          systemd:
+            name: haproxy
+            enabled: yes
+            state: started
+          become: true
