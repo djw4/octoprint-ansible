@@ -14,7 +14,7 @@ Vagrant.configure("2") do |config|
   config.vm.provision "shell", inline: <<-SHELL
     sudo apt-get update -y -q
     sudo apt-get install -y -q python3-pip python3-dev python3-setuptools python3-venv git libyaml-dev
-    python3 -m pip install ansible
+    python3 -m pip install --quiet --upgrade ansible
   SHELL
   
   config.vm.provision "ansible_local" do |ansible|
