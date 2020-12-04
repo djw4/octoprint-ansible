@@ -1,6 +1,21 @@
 ---
 - hosts: all
   gather_facts: false
+  vars:
+    octoprint_backup: /vagrant/octoprint-backup.zip
+    octoprint_plugins:
+      - "https://github.com/thijsbekke/OctoPrint-Pushover/archive/master.zip"
+      - "https://github.com/LazeMSS/OctoPrint-UICustomizer/archive/main.zip"
+      - "https://github.com/Zinc-OS/continuousprint/archive/master.zip"
+      - "https://github.com/Sebclem/OctoPrint-SimpleEmergencyStop/archive/master.zip"
+      - "https://github.com/OllisGit/OctoPrint-FilamentManager/releases/latest/download/master.zip"
+      - "https://github.com/jim-p/Change_Filament/archive/master.zip"
+      - "https://github.com/SimplyPrint/OctoPrint-Creality2xTemperatureReportingFix/archive/master.zip"
+      - "https://github.com/jneilliii/OctoPrint-BedLevelingWizard/archive/master.zip"
+      - "https://github.com/MoonshineSG/OctoPrint-Autoscroll/archive/master.zip"
+      - "https://github.com/imrahil/OctoPrint-NavbarTemp/archive/master.zip"
+      - "https://github.com/LazeMSS/OctoPrint-UICustomizer/archive/main.zip"
+      - "https://github.com/jneilliii/OctoPrint-BackupScheduler/archive/master.zip"
   tasks:
     - name: octoprint
       block:
@@ -89,18 +104,47 @@
               WantedBy=multi-user.target
           become: true
         
-        - name: Enable octoprint service
+        - name: Check for backup file
+          stat:
+            path: "{{ octoprint_backup }}"
+          register: backup
+        
+        - name: Stop octoprint service
+          systemd:
+            name: octoprint
+            state: stopped
+          become: true
+          when: backup.stat.exists
+        
+        - name: Install octoprint plugins
+          pip:
+            name: "{{ octoprint_plugins }}"
+            virtualenv: "{{ octoprint_dir.path }}/venv"
+            virtualenv_python: python3
+          become: true
+          become_user: "{{ octoprint_user.name }}"
+          when: backup.stat.exists
+        
+        - name: Restore backup
+          command:
+            cmd: >-
+              {{ octoprint_dir.path }}/venv/bin/octoprint
+              plugins backup:restore {{ backup.stat.path }}
+          become: true
+          become_user: "{{ octoprint_user.name }}"
+          when: backup.stat.exists
+        
+        - name: Rename backup now restored
+          command:
+            cmd: "mv {{ backup.stat.path }} {{ backup.stat.path }}.done"
+          when: backup.stat.exists
+        
+        - name: Enable and start octoprint service
           systemd:
             name: octoprint
             enabled: yes
             daemon_reload: yes
-            state: started
-          become: true
-        
-        - name: Set octoprint user home directory
-          user:
-            name: "{{ octoprint_user.name }}"
-            home: "{{ octoprint_dir.path }}"
+            state: restarted
           become: true
     
     - name: haproxy
