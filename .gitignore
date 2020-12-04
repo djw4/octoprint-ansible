@@ -1,6 +1,8 @@
 *.log
 ansible/*
 .vagrant/
+*.zip
+*.zip.done
 
 !ansible/install_octoprint.yaml
 !ansible/ansible.cfg
