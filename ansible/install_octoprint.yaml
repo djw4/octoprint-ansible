@@ -2,6 +2,19 @@
 - hosts: all
   gather_facts: false
   vars:
+    octoprint_config_updates:
+      accesscontrol:
+        autologinAs: admin
+        autologinLocal: true
+        enabled: true
+        localNetworks:
+          - "127.0.0.0/8"
+          - "192.168.0.0/255.255.255.0"
+      plugins:
+        pushover:
+          url: http://vagrant/
+          user_key: vagrant
+          token: vagrant
     octoprint_backup: /vagrant/octoprint-backup.zip
     octoprint_plugins:
       - "https://github.com/thijsbekke/OctoPrint-Pushover/archive/master.zip"
@@ -17,7 +30,7 @@
       - "https://github.com/LazeMSS/OctoPrint-UICustomizer/archive/main.zip"
       - "https://github.com/jneilliii/OctoPrint-BackupScheduler/archive/master.zip"
   tasks:
-    - name: octoprint
+    - name: Install Octoprint
       block:
         - name: Upgrade all packages
           apt:
@@ -147,7 +160,45 @@
             state: restarted
           become: true
     
-    - name: haproxy
+    - name: Configure octoprint
+      block:
+        - name: Stop octoprint
+          systemd:
+            name: octoprint
+            state: stopped
+          become: true
+        
+        - name: Read the octoprint config
+          slurp:
+            path: "{{ octoprint_user.home }}/.octoprint/config.yaml"
+          register: octoprint_config
+        
+        - name: Extract the config
+          set_fact:
+            octoprint_config: "{{ octoprint_config['content'] | b64decode | from_yaml }}"
+        
+        - name: Modify config
+          set_fact:
+            octoprint_config: "{{ octoprint_config | combine(item | from_json, recursive=True) }}"
+          loop:
+            - "{\"plugins\": {{ octoprint_config_updates.plugins | to_json }} }"
+            - "{\"accessControl\": {{ octoprint_config_updates.accesscontrol | to_json }} }"
+        
+        - name: Write the config back
+          copy:
+            content: "{{ octoprint_config | to_nice_yaml }}"
+            dest: "{{ octoprint_user.home }}/.octoprint/config.yaml"
+            owner: "{{ octoprint_user.name }}"
+            group: "{{ octoprint_user.name }}"
+          become: true
+        
+        - name: Start octoprint
+          systemd:
+            name: octoprint
+            state: started
+          become: true
+    
+    - name: Install HAProxy
       block:
         - name: Install haproxy with apt
           apt:
